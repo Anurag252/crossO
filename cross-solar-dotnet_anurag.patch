@@ -1,0 +1,332 @@
+From 39469341d6c1c1130d422dac408cacf695f20914 Mon Sep 17 00:00:00 2001
+From: Anurag <Anuragsgsits@gmail.com>
+Date: Mon, 30 Jul 2018 04:15:42 +0530
+Subject: [PATCH] My submission
+XOV:v2
+
+---
+ .../Controller/AnalyticsControllerTests.cs         | 89 ++++++++++++++++++++++
+ CrossSolar/Controllers/AnalyticsController.cs      | 57 +++++++++++++-
+ CrossSolar/Controllers/PanelController.cs          |  2 +-
+ CrossSolar/Domain/OneHourElectricity.cs            |  5 +-
+ CrossSolar/Models/OneDayElectricityModel.cs        |  5 +-
+ CrossSolar/Models/OneHourElectricityListModel.cs   |  2 +-
+ CrossSolar/Models/OneHourElectricityModel.cs       |  3 +
+ CrossSolar/Startup.cs                              |  7 ++
+ CrossSolar/appsettings.json                        |  2 +-
+ 9 files changed, 163 insertions(+), 9 deletions(-)
+ create mode 100644 CrossSolar.Tests/Controller/AnalyticsControllerTests.cs
+
+diff --git a/CrossSolar.Tests/Controller/AnalyticsControllerTests.cs b/CrossSolar.Tests/Controller/AnalyticsControllerTests.cs
+new file mode 100644
+index 0000000..96bb225
+--- /dev/null
++++ b/CrossSolar.Tests/Controller/AnalyticsControllerTests.cs
+@@ -0,0 +1,89 @@
++﻿using System;
++using System.Collections.Generic;
++using System.Text;
++using System.Threading.Tasks;
++using CrossSolar.Controllers;
++using CrossSolar.Domain;
++using CrossSolar.Models;
++using CrossSolar.Repository;
++using Microsoft.AspNetCore.Mvc;
++using Moq;
++using Xunit;
++namespace CrossSolar.Tests.Controller
++{
++    public class AnalyticsControllerTests
++    {
++
++        public AnalyticsControllerTests()
++        {
++          _analyticsController = new AnalyticsController(_analyticsRepositoryMock.Object, _panelRepositoryMock.Object);
++        }
++
++        private readonly PanelController _panelController;
++
++        private readonly Mock<IPanelRepository> _panelRepositoryMock = new Mock<IPanelRepository>();
++
++        private readonly AnalyticsController _analyticsController;
++
++        private readonly Mock<IAnalyticsRepository> _analyticsRepositoryMock = new Mock<IAnalyticsRepository>();
++       
++        [Fact]
++        public async Task Post_InsertsOneHourElectricityFromPanel()
++        {
++            var oneHourElectricityModel = new OneHourElectricityModel()
++            {
++                KiloWatt = 23456
++            };
++            var panelId = "AAAA1111BBBB2222";
++
++            // Arrange
++
++            // Act
++            var result = await _analyticsController.Post(panelId,oneHourElectricityModel);
++
++            // Assert
++            Assert.NotNull(result);
++
++            var createdResult = result as CreatedResult;
++            Assert.NotNull(createdResult);
++            Assert.Equal(201, createdResult.StatusCode);
++        }
++
++        [Fact]
++        public async Task Get_ReturnsOneDayElectricityFromPanel()
++        {
++            var panelId = "AAAA1111BBBB2222";
++            _analyticsRepositoryMock = anali          
++            // Arrange
++
++            // Act
++            var result = await _analyticsController.DayResults(panelId);
++
++            // Assert
++            Assert.NotNull(result);
++
++            var okResult = result as OkResult;
++            Assert.NotNull(okResult);
++            Assert.Equal(200, okResult.StatusCode);
++        }
++
++        [Fact]
++        public async Task Get_ReturnsOneHourElectricityListFromPanel()
++        {
++            var panelId = "AAAA1111BBBB2222";
++
++            // Arrange
++
++            // Act
++            var result = await _analyticsController.Get(panelId);
++
++            // Assert
++            Assert.NotNull(result);
++
++            var okResult = result as OkResult;
++            Assert.NotNull(okResult);
++            Assert.Equal(200, okResult.StatusCode);
++        }
++
++    }
++}
+diff --git a/CrossSolar/Controllers/AnalyticsController.cs b/CrossSolar/Controllers/AnalyticsController.cs
+index d2217d7..a094df7 100644
+--- a/CrossSolar/Controllers/AnalyticsController.cs
++++ b/CrossSolar/Controllers/AnalyticsController.cs
+@@ -24,7 +24,7 @@ namespace CrossSolar.Controllers
+         }
+ 
+         // GET panel/XXXX1111YYYY2222/analytics
+-        [HttpGet("{banelId}/[controller]")]
++        [HttpGet("{panelId}/[controller]")]
+         public async Task<IActionResult> Get([FromRoute] string panelId)
+         {
+             var panel = await _panelRepository.Query()
+@@ -52,11 +52,62 @@ namespace CrossSolar.Controllers
+         [HttpGet("{panelId}/[controller]/day")]
+         public async Task<IActionResult> DayResults([FromRoute] string panelId)
+         {
+-            var result = new List<OneDayElectricityModel>();
+ 
+-            return Ok(result);
++            var panel = await _panelRepository.Query()
++               .FirstOrDefaultAsync(x => x.Serial.Equals(panelId, StringComparison.CurrentCultureIgnoreCase));
++
++            if (panel == null) return NotFound();
++
++            var analytics = await _analyticsRepository.Query()
++                .Where(x => x.PanelId.Equals(panelId, StringComparison.CurrentCultureIgnoreCase)).ToListAsync();
++
++            var listByPanel = new OneHourElectricityListModel
++            { 
++                OneHourElectricitys = analytics.Select(c => new OneHourElectricityModel
++                {
++                    Id = c.Id,
++                    KiloWatt = c.KiloWatt,
++                    DateTime = c.DateTime
++                })
++            };
++
++            
++
++             var result = new List<OneDayElectricityModel>();
++            foreach (var item in listByPanel.OneHourElectricitys)
++            {
++
++                IEnumerable<OneHourElectricityModel> hourlyElectricityByDate = listByPanel.OneHourElectricitys.Where(x => x.DateTime.Date.CompareTo(item.DateTime.Date) == 0 && x.DateTime.Date.CompareTo(DateTime.Today) < 0);
++                if (hourlyElectricityByDate != null)
++                {
++                    result.Add(new OneDayElectricityModel()
++                    {
++                        Maximum = hourlyElectricityByDate.Max(k => k.KiloWatt),
++                        Minimum = hourlyElectricityByDate.Min(k => k.KiloWatt),
++                        Sum = hourlyElectricityByDate.Sum(k => k.KiloWatt),
++                        Average = hourlyElectricityByDate.Average(k => k.KiloWatt)
++                        ,
++                        DateTime = item.DateTime
++                    });
++                }
++            }
++            // result.Add(result.Add(res));
++            var resultCopy = result;
++            List<OneDayElectricityModel> resultCleaned = new List<OneDayElectricityModel>();
++            for(int i = 0; i < result.Count; i ++)
++            {
++
++                resultCleaned.Add(result[i]);
++                result.RemoveAll(x => x.DateTime.Date.Equals(result[i].DateTime.Date));
++
++            }
++            
++         
++            
++            return Ok(resultCleaned);
+         }
+ 
++
+         // POST panel/XXXX1111YYYY2222/analytics
+         [HttpPost("{panelId}/[controller]")]
+         public async Task<IActionResult> Post([FromRoute] string panelId, [FromBody] OneHourElectricityModel value)
+diff --git a/CrossSolar/Controllers/PanelController.cs b/CrossSolar/Controllers/PanelController.cs
+index 7b72543..162a0df 100644
+--- a/CrossSolar/Controllers/PanelController.cs
++++ b/CrossSolar/Controllers/PanelController.cs
+@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace CrossSolar.Controllers
+ {
+-    [Route("[controller]")]
++    [Route("api/[controller]")]
+     public class PanelController : Controller
+     {
+         private readonly IPanelRepository _panelRepository;
+diff --git a/CrossSolar/Domain/OneHourElectricity.cs b/CrossSolar/Domain/OneHourElectricity.cs
+index 8bcdf82..3586676 100644
+--- a/CrossSolar/Domain/OneHourElectricity.cs
++++ b/CrossSolar/Domain/OneHourElectricity.cs
+@@ -1,8 +1,8 @@
+ ﻿using System;
+-
++using System.Collections.Generic;
+ namespace CrossSolar.Domain
+ {
+-    public class OneHourElectricity
++    public class OneHourElectricity 
+     {
+         public int Id { get; set; }
+ 
+@@ -11,5 +11,6 @@ namespace CrossSolar.Domain
+         public long KiloWatt { get; set; }
+ 
+         public DateTime DateTime { get; set; }
++
+     }
+ }
+\ No newline at end of file
+diff --git a/CrossSolar/Models/OneDayElectricityModel.cs b/CrossSolar/Models/OneDayElectricityModel.cs
+index e0d422b..f0286f1 100644
+--- a/CrossSolar/Models/OneDayElectricityModel.cs
++++ b/CrossSolar/Models/OneDayElectricityModel.cs
+@@ -1,8 +1,9 @@
+ ﻿using System;
++using System.Collections.Generic;
+ 
+ namespace CrossSolar.Domain
+ {
+-    public class OneDayElectricityModel
++    public class OneDayElectricityModel 
+     {
+         public double Sum { get; set; }
+ 
+@@ -13,5 +14,7 @@ namespace CrossSolar.Domain
+         public double Minimum { get; set; }
+ 
+         public DateTime DateTime { get; set; }
++
++       
+     }
+ }
+\ No newline at end of file
+diff --git a/CrossSolar/Models/OneHourElectricityListModel.cs b/CrossSolar/Models/OneHourElectricityListModel.cs
+index 162d264..2857c31 100644
+--- a/CrossSolar/Models/OneHourElectricityListModel.cs
++++ b/CrossSolar/Models/OneHourElectricityListModel.cs
+@@ -2,7 +2,7 @@
+ 
+ namespace CrossSolar.Models
+ {
+-    public class OneHourElectricityListModel
++    public class OneHourElectricityListModel 
+     {
+         public IEnumerable<OneHourElectricityModel> OneHourElectricitys { get; set; }
+     }
+diff --git a/CrossSolar/Models/OneHourElectricityModel.cs b/CrossSolar/Models/OneHourElectricityModel.cs
+index a278d9d..7d4b4bf 100644
+--- a/CrossSolar/Models/OneHourElectricityModel.cs
++++ b/CrossSolar/Models/OneHourElectricityModel.cs
+@@ -1,4 +1,5 @@
+ ﻿using System;
++using System.Collections.Generic;
+ 
+ namespace CrossSolar.Models
+ {
+@@ -9,5 +10,7 @@ namespace CrossSolar.Models
+         public long KiloWatt { get; set; }
+ 
+         public DateTime DateTime { get; set; }
++
++        
+     }
+ }
+\ No newline at end of file
+diff --git a/CrossSolar/Startup.cs b/CrossSolar/Startup.cs
+index 69e76fc..4fddd55 100644
+--- a/CrossSolar/Startup.cs
++++ b/CrossSolar/Startup.cs
+@@ -27,6 +27,7 @@ namespace CrossSolar
+             services.AddTransient<IAnalyticsRepository, AnalyticsRepository>();
+             services.AddTransient<IDayAnalyticsRepository, DayAnalyticsRepository>();
+             services.AddMvc();
++            services.AddRouting();
+         }
+ 
+         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+@@ -34,6 +35,11 @@ namespace CrossSolar
+         {
+             if (env.IsDevelopment())
+             {
++                using (var serviceScope = app.ApplicationServices.GetService<IServiceScopeFactory>().CreateScope())
++                {
++                    var context = serviceScope.ServiceProvider.GetRequiredService<CrossSolarDbContext>();
++                    context.Database.EnsureCreated();
++                }
+                 app.UseDeveloperExceptionPage();
+                 app.UseHttpStatusCodeExceptionMiddleware();
+             }
+@@ -44,6 +50,7 @@ namespace CrossSolar
+             }
+ 
+             app.UseMvc();
++          
+         }
+     }
+ }
+\ No newline at end of file
+diff --git a/CrossSolar/appsettings.json b/CrossSolar/appsettings.json
+index 43e8e63..9048448 100644
+--- a/CrossSolar/appsettings.json
++++ b/CrossSolar/appsettings.json
+@@ -1,6 +1,6 @@
+ ﻿{
+   "ConnectionStrings": {
+-    "DefaultConnection": "Server=.\\SQLEXPRESS;Database=CrossSolarDb;Trusted_Connection=True;"
++    "DefaultConnection": "Data Source=LAPTOP-N9UADN0U\\SQLEXPRESS;Integrated Security=True;Database=CrossSolarDb;Trusted_Connection=True;"
+   },
+   "Logging": {
+     "IncludeScopes": false,
+-- 
+2.16.2.windows.1
+
